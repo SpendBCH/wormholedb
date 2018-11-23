@@ -1,0 +1,16 @@
+{
+  "apps": [
+      {
+        "name": "wormholdb",
+        "script": "/app/index.js",
+        "max_restarts": 20,
+        "cwd": "/app/",
+        "env": {
+            "host": "127.0.0.1",
+            "rpc_user": "user",
+            "rpc_pass": "pass"
+        },
+        "restart_delay": 4000
+      }
+  ]
+}
