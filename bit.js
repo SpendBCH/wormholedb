@@ -1,5 +1,5 @@
 const zmq = require('zeromq')
-const RpcClient = require('bitcoind-rpc')
+const RpcClient = require('wormholed-rpc')
 const TNA = require('tna')
 const pLimit = require('p-limit')
 const pQueue = require('p-queue')
@@ -52,6 +52,21 @@ const request = {
       })
     })
   },
+  whcBlock: function(block_index) {
+    return new Promise(async function(resolve) {
+      const block = await request.block(block_index)
+
+      rpc.whc_listBlockTransactions(block_index, function(err, whcBlockTxs) {
+        if (err) {
+          console.log('Err = ', err)
+          throw new Error(err)
+        } else {
+          block.result.tx = whcBlockTxs.result
+          resolve(block)
+        }
+      })
+    })
+  },
   /**
   * Return the current blockchain height
   */
@@ -71,6 +86,21 @@ const request = {
     let content = await TNA.fromHash(hash, Config.rpc)
     return content
   },
+  whcTx: function(hash) {
+    return new Promise(async function(resolve) {
+      rpc.whc_gettransaction(hash, function(err, res) {
+        if (err) {
+          console.log('Err = ', err)
+          throw new Error(err)
+        } else {
+          res.result.tx = { 
+            h: res.result.txid
+          }
+          resolve(res.result)
+        }
+      })
+    })
+  },
   mempool: function() {
     return new Promise(function(resolve) {
       rpc.getRawMemPool(async function(err, ret) {
@@ -83,7 +113,7 @@ const request = {
           console.log('txs = ', txs.length)
           for(let i=0; i<txs.length; i++) {
             tasks.push(limit(async function() {
-              let content = await request.tx(txs[i]).catch(function(e) {
+              let content = await request.whcTx(txs[i]).catch(function(e) {
                 console.log('Error = ', e)
               })
               return content
@@ -97,7 +127,7 @@ const request = {
   }
 }
 const crawl = async function(block_index) {
-  let block_content = await request.block(block_index)
+  let block_content = await request.whcBlock(block_index)
   let block_hash = block_content.result.hash
   let block_time = block_content.result.time
 
@@ -108,7 +138,7 @@ const crawl = async function(block_index) {
     const limit = pLimit(Config.rpc.limit)
     for(let i=0; i<txs.length; i++) {
       tasks.push(limit(async function() {
-        let t = await request.tx(txs[i]).catch(function(e) {
+        let t = await request.whcTx(txs[i]).catch(function(e) {
           console.log('Error = ', e)
         })
         t.blk = {
@@ -222,7 +252,7 @@ const sync = async function(type, hash) {
     }
   } else if (type === 'mempool') {
     queue.add(async function() {
-      let content = await request.tx(hash)
+      let content = await request.whcTx(hash)
       try {
         await Db.mempool.insert(content)
         console.log('# Q inserted [size: ' + queue.size + ']',  hash)
