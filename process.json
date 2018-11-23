@@ -1,7 +1,7 @@
 {
   "apps": [
       {
-        "name": "wormholdb",
+        "name": "wormholedb",
         "script": "/app/index.js",
         "max_restarts": 20,
         "cwd": "/app/",
