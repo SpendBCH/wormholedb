@@ -87,11 +87,16 @@ const request = {
     return content
   },
   whcTx: function(hash) {
-    return new Promise(async function(resolve) {
+    return new Promise(async function(resolve, reject) {
       rpc.whc_gettransaction(hash, function(err, res) {
         if (err) {
-          console.log('Err = ', err)
-          throw new Error(err)
+          if (err.code == -5 && err.message == 'Not a Wormhole Protocol transaction') {
+            reject(err)
+          }
+          else {
+            console.log('Err = ', err)
+            throw new Error(err)
+          }
         } else {
           res.result.tx = { 
             h: res.result.txid
@@ -120,6 +125,37 @@ const request = {
             }))
           }
           let btxs = await Promise.all(tasks)
+          resolve(btxs)
+        }
+      })
+    })
+  },
+  whcMempool: function() {
+    return new Promise(function(resolve) {
+      rpc.getRawMemPool(async function(err, ret) {
+        if (err) {
+          console.log('Err', err)
+        } else {
+          let tasks = []
+          const limit = pLimit(Config.rpc.limit)
+          let txs = ret.result
+          console.log('txs = ', txs.length)
+          for(let i=0; i<txs.length; i++) {
+            tasks.push(limit(async function() {
+              try {
+                let content = await request.whcTx(txs[i])
+                return content
+              } catch (e) {
+                if (e.code == -5 && e.message == 'Not a Wormhole Protocol transaction') {
+                  return null
+                } else {
+                  throw e
+                }
+              }
+            }))
+          }
+          let btxs = await Promise.all(tasks)
+          btxs = btxs.filter(btx => btx != null)
           resolve(btxs)
         }
       })
@@ -233,7 +269,7 @@ const sync = async function(type, hash) {
       // clear mempool and synchronize
       if (lastSynchronized < currentHeight) {
         console.log('Clear mempool and repopulate')
-        let items = await request.mempool()
+        let items = await request.whcMempool()
         await Db.mempool.sync(items)
       }
 
@@ -252,8 +288,9 @@ const sync = async function(type, hash) {
     }
   } else if (type === 'mempool') {
     queue.add(async function() {
-      let content = await request.whcTx(hash)
+      let content
       try {
+        content = await request.whcTx(hash)
         await Db.mempool.insert(content)
         console.log('# Q inserted [size: ' + queue.size + ']',  hash)
         console.log(content)
@@ -262,7 +299,10 @@ const sync = async function(type, hash) {
         // duplicates are ok because they will be ignored
         if (e.code == 11000) {
           console.log('Duplicate mempool item: ', content)
-        } else {
+        } else if (e.code == -5 && e.message == 'Not a Wormhole Protocol transaction') {
+          console.log('Non wormhole tx from mempool')
+        }
+        else {
           console.log('## ERR ', e, content)
           process.exit()
         }
@@ -278,7 +318,7 @@ const run = async function() {
 
   // initial mempool sync
   console.log('Clear mempool and repopulate')
-  let items = await request.mempool()
+  let items = await request.whcMempool()
   await Db.mempool.sync(items)
 }
 module.exports = {
